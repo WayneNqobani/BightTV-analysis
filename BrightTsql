@@ -1,0 +1,164 @@
+SELECT*FROM user_profiles ;
+SELECT*FROM viewership ;
+
+---SELECT DISTINCT  COUNT(*) AS UserID FROM bright_tv_user_profiles;
+--SELECT DISTINCT COUNT(*) AS UserID FROM bright_tv_viewership;
+-- Create a temp view with SA time conversion
+CREATE OR REPLACE TEMP VIEW viewership AS
+SELECT  
+  UserID,
+  Duration2,
+  Channel2,
+  RecordDate2,
+  TO_TIMESTAMP(
+    RecordDate2, 
+    'yyyy/MM/dd HH:mm'
+  ) + INTERVAL 2 HOURS  AS SA_RecordDate
+FROM viewership;
+
+
+
+
+
+--Join Viewership with UserProfiles
+SELECT 
+  v.UserID,
+  u.Gender,
+  u.Age,
+  u.Province,
+  v.Channel2,
+  TO_TIMESTAMP(RecordDate2, 'yyyy/MM/dd HH:mm'
+  ) + INTERVAL 2 HOURS  AS SA_RecordDate
+FROM viewership v
+JOIN USER_PROFILES u ON v.UserID = u.UserID;
+
+
+-- Step 1: Add SA_RecordDate with correct timestamp conversion
+CREATE OR REPLACE TEMP VIEW viewership_sa AS
+SELECT  
+  UserID,
+  TO_TIMESTAMP(RecordDate2, 'yyyy/MM/dd HH:mm') + INTERVAL 2 HOURS AS SA_RecordDate
+FROM viewership;
+
+-- Step 2: Find each user's first active month
+CREATE OR REPLACE TEMP VIEW first_use_month AS
+SELECT
+  UserID,
+  DATE_TRUNC('month', MIN(SA_RecordDate)) AS first_month
+FROM viewership_sa
+WHERE SA_RecordDate IS NOT NULL
+GROUP BY UserID;
+
+-- Step 3: Aggregate new and returning users per month
+SELECT
+  DATE_TRUNC('month', v.SA_RecordDate) AS month,
+  COUNT(DISTINCT CASE WHEN DATE_TRUNC('month', v.SA_RecordDate) = f.first_month THEN v.UserID END) AS new_users,
+  COUNT(DISTINCT CASE WHEN DATE_TRUNC('month', v.SA_RecordDate) > f.first_month THEN v.UserID END) AS returning_users
+FROM viewership_sa v
+JOIN first_use_month f ON v.UserID = f.UserID
+GROUP BY DATE_TRUNC('month', v.SA_RecordDate)
+ORDER BY month;
+
+
+
+
+----Consumption KPI
+
+SELECT
+  
+  CASE
+    WHEN HOUR(SA_RecordDate) BETWEEN 5 AND 11 THEN 'Morning'
+    WHEN HOUR(SA_RecordDate) BETWEEN 12 AND 16 THEN 'Midday'
+    WHEN HOUR(SA_RecordDate) BETWEEN 17 AND 23 THEN 'Evening'
+    ELSE 'Night'
+  END AS time_bucket, COUNT(* ) AS total_views
+FROM viewership v
+WHERE SA_RecordDate IS NOT NULL 
+GROUP BY time_bucket
+ORDER BY total_views DESC;
+
+---daily active users
+SELECT 
+    DATE(SA_RecordDate) AS day, 
+    COUNT(DISTINCT UserID) AS DAU
+FROM viewership
+WHERE SA_RecordDate IS NOT NULL
+GROUP BY DATE(SA_RecordDate)
+ORDER BY day;
+
+SELECT DAYOFWEEK(SA_RecordDate) AS dayofweeK ,COUNT(*) AS total_views
+FROM viewership
+WHERE SA_RecordDate IS NOT NULL
+GROUP BY  DAYOFWEEK(SA_RecordDate)
+ORDER BY total_views DESC ;
+
+
+SELECT 
+HOUR(SA_RecordDate) AS hour ,COUNT(*) AS total_views
+FROM viewership
+WHERE SA_RecordDate IS NOT NULL
+GROUP BY HOUR(SA_RecordDate)
+ORDER BY total_views DESC ;
+
+
+---CHANNEL KPIs
+-- Top channels by total views
+SELECT Channel2, COUNT(*) AS total_views
+FROM viewership
+WHERE Channel2 IS NOT NULL
+GROUP BY Channel2
+ORDER BY total_views DESC
+LIMIT 10;
+
+-- Top channels by unique users
+SELECT Channel2, COUNT(DISTINCT UserID) AS unique_users
+FROM viewership
+WHERE Channel2 IS NOT NULL
+GROUP BY Channel2
+ORDER BY unique_users DESC
+LIMIT 10;
+
+SELECT  
+  v.Channel2,
+  CASE 
+    WHEN u.Age < 20 THEN 'Under 20'
+    WHEN u.Age BETWEEN 20 AND 29 THEN '20-29'
+    WHEN u.Age BETWEEN 30 AND 39 THEN '30-39'
+    WHEN u.Age BETWEEN 40 AND 49 THEN '40-49'
+    WHEN u.Age BETWEEN 50 AND 59 THEN '50-59'
+    ELSE '60+'
+  END AS Age_Bracket
+FROM viewership v
+JOIN user_profiles u ON v.UserID = u.UserID
+WHERE v.Channel2 IS NOT NULL AND u.Age IS NOT NULL 
+GROUP BY Age_Bracket, v.Channel2
+ORDER BY Age_Bracket;
+
+--See which Gender watched the Most , as there are various gender tpes : MALE , female and other  the null data will be added on other 
+SELECT 
+    CASE 
+        WHEN LOWER(Gender) = 'male' THEN 'Male'
+        WHEN LOWER(Gender) = 'female' THEN 'Female'
+        ELSE 'Other'
+    END AS Gender_group,
+    COUNT(*) AS total_views
+FROM   user_profiles u
+JOIN viewership v ON  u.UserID = v.UserID
+GROUP BY 
+    CASE 
+        WHEN LOWER(Gender) = 'male' THEN 'Male'
+        WHEN LOWER(Gender) = 'female' THEN 'Female'
+        ELSE 'Other'
+    END
+ORDER BY total_views DESC;
+
+
+-- Consumption by province
+SELECT u.Province, COUNT(*) AS total_views
+FROM viewership v
+JOIN user_profiles u ON v.UserID = u.UserID
+WHERE u.Province IS NOT NULL
+GROUP BY u.Province
+ORDER BY total_views DESC;
+
+
